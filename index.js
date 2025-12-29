@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
+const connectDB = require('./db');
 // Routes
 const authRoutes = require('./routes/userRoutes');
 const courseRoutes = require('./routes/coursesRoutes');
@@ -16,16 +16,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/course', courseRoutes);
-app.use('/api/admin', adminRoutes);
-
-// Base route
-app.get('/', (req, res) => {
-  res.send('Life Coaching API is running...');
-});
 
 // 🔑 MongoDB Connection (Singleton pattern for Vercel)
 let isConnected = false;
@@ -49,5 +39,17 @@ app.use(async (req, res, next) => {
   await connectDB();
   next();
 });
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/course', courseRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Base route
+app.get('/', (req, res) => {
+  res.send('Life Coaching API is running...');
+});
+
+
+
 
 module.exports = app;
