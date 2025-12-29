@@ -24,8 +24,9 @@ app.use('/api/admin', adminRoutes); // <-- Mount Admin Routes
 
 const seedSuperAdmin = require('./utils/seedSuperAdmin'); // <-- Import Seeder
 // Database Connection
-let isConnected = false;
+
  async function connectDB() {
+  let isConnected = false;
   try {
     await mongoose.connect(process.env.MONGO_URI, {
       useNewUrlParser: true,
@@ -48,4 +49,4 @@ app.get('/', (req, res) => {
 // app.listen(PORT, () => {
 //   console.log(`🚀 Server running on port ${PORT}`);
 // });
-module.exports = app
+module.exports = { app, connectDB };
