@@ -24,17 +24,28 @@ app.use('/api/admin', adminRoutes); // <-- Mount Admin Routes
 
 const seedSuperAdmin = require('./utils/seedSuperAdmin'); // <-- Import Seeder
 // Database Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected')
-  )
-  .then(() => seedSuperAdmin()) // <-- Seed Super Admin after DB connection
-  .catch(err => console.error('❌ MongoDB Connection Error:', err));
-
+let isConnected = false;
+ async function connectDB() {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    isConnected = true;
+    console.log('✅ MongoDB connected successfully');
+    // Seed Super Admin if not exists
+    await seedSuperAdmin();
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    process.exit(1); // Exit process with failure
+  }
+ }
 // Base Route
 app.get('/', (req, res) => {
   res.send('Life Coaching API is running...');
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`🚀 Server running on port ${PORT}`);
+// });
+module.exports = app
