@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const connectDB = require('./db');
 // Routes
 const authRoutes = require('./routes/userRoutes');
 const courseRoutes = require('./routes/coursesRoutes');
