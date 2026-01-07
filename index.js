@@ -51,6 +51,7 @@ app.get('/', (req, res) => {
   res.send('Life Coaching API is running...');
 });
 
+module.exports = app;
 
 
 
