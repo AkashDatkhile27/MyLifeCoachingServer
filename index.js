@@ -2,10 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 // Routes
-
 const authRoutes = require('./routes/userRoutes');
 const courseRoutes = require('./routes/coursesRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+
 
 const seedSuperAdmin = require('./utils/seedSuperAdmin');
 
@@ -50,6 +50,7 @@ app.use('/api/admin', adminRoutes);
 app.get('/', (req, res) => {
   res.send('Life Coaching API is running...');
 });
+
 
 
 
