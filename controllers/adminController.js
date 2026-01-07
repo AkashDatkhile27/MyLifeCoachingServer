@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Session = require('../models/Session');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const Reflection = require('../models/Reflection');
 const seedSuperAdmin = require('../utils/seedSuperAdmin'); // Import the seeder
 
 // --- ADMIN LOGIN ---
@@ -300,5 +301,46 @@ exports.deleteSession = async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
+  }
+};
+
+
+
+
+exports.replyToReflection = async (req, res) => {
+  const { reflectionId, replyText } = req.body;
+
+  if (!replyText || !reflectionId) {
+    return res.status(400).json({ message: "Reflection ID and Reply Text are required" });
+  }
+
+  try {
+    // 1. Verify Admin Role explicitly by fetching from DB
+    // This handles cases where req.user might not have the role populated from the token
+    const adminUser = await User.findById(req.user.id);
+    
+    if (!adminUser || (adminUser.role !== 'admin' && adminUser.role !== 'superadmin')) {
+      return res.status(403).json({ message: "Access denied. Not authorized." });
+    }
+
+    // 2. Find and Update Reflection
+    const reflection = await Reflection.findById(reflectionId);
+    if (!reflection) return res.status(404).json({ message: "Reflection not found" });
+
+    // Push the new reply object to the adminReply array
+    reflection.adminReply.push({
+      text: replyText,
+      date: Date.now()
+    });
+
+    reflection.status = 'replied';
+    reflection.lastUpdated = Date.now();
+
+    await reflection.save();
+
+    res.status(200).json(reflection);
+  } catch (error) {
+    console.error("Error in replyToReflection:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
