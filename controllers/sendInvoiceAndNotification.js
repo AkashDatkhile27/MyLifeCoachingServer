@@ -47,29 +47,33 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
     `;
     }
     
-    // Generate PDF using Puppeteer
-    const browser = await puppeteer.launch({ 
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] // Recommended for cloud environments
-    });
-    const page = await browser.newPage();
-    
-    // Set content and wait for network idle to ensure styles are loaded (if external)
-    await page.setContent(invoiceContent, { waitUntil: 'networkidle0' });
-    
-    const pdfBuffer = await page.pdf({ 
-        format: 'A4', 
-        printBackground: true,
-        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
-    });
-    
-    await browser.close();
+   // --- TRY PDF GENERATION ---
+    try {
+        const browser = await puppeteer.launch({ 
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Critical for server environments
+        });
+        const page = await browser.newPage();
+        
+        // Use setContent with timeout to prevent hanging
+        await page.setContent(invoiceContent, { waitUntil: 'networkidle0', timeout: 30000 });
+        
+        const pdfBuffer = await page.pdf({ 
+            format: 'A4', 
+            printBackground: true,
+            margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
+        });
+        
+        await browser.close();
 
-    const attachments = [{
-        filename: 'Invoice.pdf',
-        content: pdfBuffer,
-        contentType: 'application/pdf'
-    }];
+        attachments.push({
+            filename: 'Invoice.pdf',
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        });
+    } catch (pdfError) {
+        console.error("⚠️ PDF Generation Failed (Falling back to HTML):", pdfError.message);
+    }
         //Email User: Combine Greeting + Invoice in the email body
     const userEmailBody = `
       <div style="font-family: Arial, sans-serif; color: #333;">
@@ -103,5 +107,6 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
    
     
 };
+
 
 module.exports = sendInvoiceAndNotification;
