@@ -2,12 +2,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
-const generateIntroSessionInvoice= require('../utils/invoiceTemplates');
 const sendEmail = require('../utils/sendEmail');
 const User = require('../models/User');
 const Token = require('../models/Token');
 const dotenv = require('dotenv');
-const puppeteer = require('puppeteer');
+const Otp = require('../models/OtpSchema');
 dotenv.config();
 const sendInvoiceAndNotification = require('./sendInvoiceAndNotification');
 
@@ -71,7 +70,6 @@ exports.createSessionPaymentOrder = async (req, res) => {
 };
 
 // --- 2. Notify Admin of New Booking ---
-// --- 2. Notify Admin of New Booking ---
 exports.notifyAdminBooking = async (req, res) => {
   try {
     const { name, email, phone, paymentId, orderId, amount = 199, date } = req.body;
@@ -99,67 +97,7 @@ exports.notifyAdminBooking = async (req, res) => {
 };
 
 
-// Request Access to a Session ---
-exports.requestSessionAccess = async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    // Initialize arrays if missing
-    if (!user.accessRequests) user.accessRequests = [];
-
-    // Check if there is already a PENDING request for this session
-    const existingPending = user.accessRequests.find(
-      r => r.sessionId.toString() === sessionId && r.status === 'pending'
-    );
-
-    if (existingPending) {
-      return res.status(400).json({ message: 'You already have a pending request for this session.' });
-    }
-
-    // Check Usage Limit (Max 3 requests per session history)
-    // We count how many times this session appears in the requests array regardless of status
-    const requestCount = user.accessRequests.filter(r => r.sessionId.toString() === sessionId).length;
-
-    if (requestCount >= 3) {
-      return res.status(403).json({ message: 'Access request limit reached for this session.' });
-    }
-
-    // Add New Request
-    user.accessRequests.push({
-      sessionId,
-      status: 'pending',
-      requestedAt: new Date(),
-      requestCount: requestCount + 1
-    });
-
-    await user.save();
-
-    res.json({ 
-      success: true, 
-      message: 'Access request sent to Admin.',
-      accessRequests: user.accessRequests
-    });
-
-  } catch (err) {
-    res.status(500).send(err.message || 'Server Error');
-  }
-};
-
-// Get User Notifications ---
-exports.getNotifications = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('notifications');
-    // Return most recent first
-    const sorted = user.notifications ? user.notifications.sort((a,b) => b.createdAt - a.createdAt) : [];
-    res.json(sorted);
-  } catch (err) {
-    res.status(500).send(err.message || 'Server Error');
-  }
-};
 
 // --- User Registration ---
 exports.register = async (req, res) => {
@@ -264,6 +202,8 @@ exports.register = async (req, res) => {
 };
 
 // --- User Login ---
+
+// --- UPDATED LOGIN: STEP 1 (Credentials -> OTP) ---
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -272,47 +212,138 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
     const normalizedEmail = email.toLowerCase().trim();
-    const cleanPassword = password.trim();
-
-    let user = await User.findOne({ email: normalizedEmail });
+    
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(400).json({ message: 'Invalid Credentials' });
     }
 
-    const isMatch = await bcrypt.compare(cleanPassword, user.password);
+    const isMatch = await bcrypt.compare(password.trim(), user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid Credentials' });
     }
 
-    const payload = { user: { id: user.id } };
+    // --- Generate OTP ---
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+    
+    // Hash OTP before saving
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otpCode, salt);
 
-    jwt.sign(
-      payload,
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' },
-      (err, token) => {
-        if (err) throw err;
-        res.json({ 
-          token, 
-          user: { 
-            role: user.role,
-            id: user.id, 
-            name: user.Name, 
-            email: user.email, 
-            phone: user.phone,
-            hasPaid: user.hasPaid, 
-            profilePicture: user.profilePicture,
-            completedSessions: user.completedSessions,
-            accessRequests: user.accessRequests || [],
-            notifications: user.notifications || []
-          } 
+    // Save to separate Otp collection
+    // First, clear any existing OTPs for this user to ensure only one valid OTP exists
+    await Otp.deleteMany({ userId: user._id });
+
+    // Create new OTP document (Auto-deletes after 10 mins via schema)
+    await Otp.create({
+      userId: user._id,
+      otp: hashedOtp,
+      createdAt: Date.now() 
+    });
+
+    // --- Send Email ---
+    const message = `Your login OTP for MyLifeCoaching is: ${otpCode}\n\nThis code expires in 10 minutes.`;
+    try {
+        await sendEmail({
+            email: user.email,
+            subject: 'Login OTP - MyLifeCoaching',
+            message: message
         });
-      }
+    } catch (err) {
+        console.error("OTP Email Failed:", err);
+        return res.status(500).json({ message: 'Email could not be sent' });
+    }
+
+    // --- Generate Temp Token ---
+    const tempToken = jwt.sign(
+        { id: user.id, role: 'temp_otp_auth' }, 
+        process.env.JWT_SECRET, 
+        { expiresIn: '10m' }
     );
+
+    res.json({ 
+        requiresOtp: true, 
+        tempToken, 
+        message: 'OTP sent to your email' 
+    });
+
   } catch (err) {
+    console.error("Login Error:", err);
     res.status(500).send(err.message || 'Server Error');
   }
 };
+
+
+// --- UPDATED LOGIN: STEP 2 (Verify OTP -> Final Token) ---
+exports.verifyLoginOtp = async (req, res) => {
+    try {
+        const { token, otp } = req.body;
+
+        if (!token || !otp) {
+            return res.status(400).json({ message: 'Token and OTP are required' });
+        }
+
+        // Verify Temp Token
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (e) {
+            return res.status(401).json({ message: 'Session expired. Please login again.' });
+        }
+
+        // Find user to ensure they exist
+        const user = await User.findById(decoded.id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // Find OTP record in the separate collection
+        const otpRecord = await Otp.findOne({ userId: user._id });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'OTP expired or invalid. Please login again.' });
+        }
+
+        // Verify OTP hash
+        const isMatch = await bcrypt.compare(otp, otpRecord.otp);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Invalid OTP' });
+        }
+
+        // --- Success: Delete used OTP & Issue Real Token ---
+        await Otp.deleteOne({ _id: otpRecord._id });
+
+        const authToken = jwt.sign(
+            { user: { id: user.id } },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' },
+            (err, token) => {
+              if (err) throw err;
+              res.json({ 
+                token, 
+                user: { 
+                  role: user.role,
+                  id: user.id, 
+                  name: user.Name, 
+                  email: user.email, 
+                  phone: user.phone,
+                  hasPaid: user.hasPaid, 
+                  profilePicture: user.profilePicture,
+                  completedSessions: user.completedSessions,
+                  accessRequests: user.accessRequests || [],
+                  notifications: user.notifications || []
+                } 
+              });
+            }
+        );
+
+    } catch (err) {
+        console.error("OTP Verification Error:", err);
+        res.status(500).send(err.message || 'Server Error');
+    }
+};
+
+
+
+
 
 // Update User Profile ---
 exports.updateProfile = async (req, res) => {
@@ -426,5 +457,71 @@ exports.resetPasswordWithEmailLink = async (req, res) => {
 
   } catch (err) {
     res.status(500).json(err.message || 'Server Error');
+  }
+};
+
+
+
+//----session----- 
+
+// Request Access to a Session ---
+exports.requestSessionAccess = async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const userId = req.user.id;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Initialize arrays if missing
+    if (!user.accessRequests) user.accessRequests = [];
+
+    // Check if there is already a PENDING request for this session
+    const existingPending = user.accessRequests.find(
+      r => r.sessionId.toString() === sessionId && r.status === 'pending'
+    );
+
+    if (existingPending) {
+      return res.status(400).json({ message: 'You already have a pending request for this session.' });
+    }
+
+    // Check Usage Limit (Max 3 requests per session history)
+    // We count how many times this session appears in the requests array regardless of status
+    const requestCount = user.accessRequests.filter(r => r.sessionId.toString() === sessionId).length;
+
+    if (requestCount >= 3) {
+      return res.status(403).json({ message: 'Access request limit reached for this session.' });
+    }
+
+    // Add New Request
+    user.accessRequests.push({
+      sessionId,
+      status: 'pending',
+      requestedAt: new Date(),
+      requestCount: requestCount + 1
+    });
+
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: 'Access request sent to Admin.',
+      accessRequests: user.accessRequests
+    });
+
+  } catch (err) {
+    res.status(500).send(err.message || 'Server Error');
+  }
+};
+
+// Get User Notifications ---
+exports.getNotifications = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('notifications');
+    // Return most recent first
+    const sorted = user.notifications ? user.notifications.sort((a,b) => b.createdAt - a.createdAt) : [];
+    res.json(sorted);
+  } catch (err) {
+    res.status(500).send(err.message || 'Server Error');
   }
 };

@@ -293,6 +293,8 @@ exports.getSessions = async (req, res) => {
     res.status(500).send('Server Error');
   }
 };
+
+
 // 2. Submit Reflection
 exports.submitReflection = async (req, res) => {
   try {
@@ -322,18 +324,7 @@ exports.submitReflection = async (req, res) => {
   }
 };
 
-// 3. Mock Payment
-exports.processPayment = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    user.hasPaid = true;
-    await user.save();
-    res.json({ success: true, message: 'Payment Successful. Course Unlocked.' });
-  } catch (err) {
-    
-    res.status(500).send('Server Error');
-  }
-};
+
 
 // 4. Mark Session as Complete (With Data Repair)
 // Route: PUT /api/course/sessions/:id/complete
