@@ -30,6 +30,13 @@ const UserSchema = new mongoose.Schema({
     type: Boolean, 
     default: false 
   }, // Set to true on registration in this specific flow
+   paymentInfo: {
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
+    amountPaid: { type: Number },
+    paymentDate: { type: Date }
+  },
   completedSessions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Session'

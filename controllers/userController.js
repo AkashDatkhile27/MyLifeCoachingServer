@@ -1,11 +1,103 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const Razorpay = require('razorpay');
+const generateIntroSessionInvoice= require('../utils/invoiceTemplates');
 const sendEmail = require('../utils/sendEmail');
 const User = require('../models/User');
 const Token = require('../models/Token');
 const dotenv = require('dotenv');
+const puppeteer = require('puppeteer');
 dotenv.config();
+const sendInvoiceAndNotification = require('./sendInvoiceAndNotification');
+
+
+// Initialize Razorpay
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+});
+
+// --- Create Razorpay Order  for payment of 30000---
+// Frontend calls this first when user clicks "Pay & Register"
+exports.createPaymentOrder = async (req, res) => {
+  try {
+    const options = {
+      amount: 25000 * 100, // 30,000 INR in paise
+      currency: "INR",
+      receipt: "receipt_" + Date.now(),
+      payment_capture: 1
+    };
+
+    const order = await razorpay.orders.create(options);
+    
+    res.json({
+      success: true,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: process.env.RAZORPAY_KEY_ID 
+    });
+  } catch (error) {
+    console.error("Razorpay Error:", error);
+    res.status(500).send(error.message || 'Error creating payment order');
+  }
+};
+
+
+// --- 1. Create Payment Order for ₹199 Session ---
+exports.createSessionPaymentOrder = async (req, res) => {
+  try {
+    const options = {
+      amount: 199 * 100, // 199 INR in paise
+      currency: "INR",
+      receipt: "receipt_session_" + Date.now(),
+      payment_capture: 1 // Auto capture
+    };
+
+    const order = await razorpay.orders.create(options);
+    
+    res.json({
+      success: true,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: process.env.RAZORPAY_KEY_ID 
+    });
+  } catch (error) {
+    console.error("Razorpay Session Order Error:", error);
+    res.status(500).json({ message: error.message || 'Error creating session payment order' });
+  }
+};
+
+// --- 2. Notify Admin of New Booking ---
+// --- 2. Notify Admin of New Booking ---
+exports.notifyAdminBooking = async (req, res) => {
+  try {
+    const { name, email, phone, paymentId, orderId, amount = 199, date } = req.body;
+
+    // Determine description
+    let description = "Introduction Session (Demo Call)";
+    if (amount == 30000) description = "15-Day Transformation Course";
+
+    // Reuse the helper function to generate PDF and send emails
+    await sendInvoiceAndNotification({
+        name, 
+        email, 
+        phone, 
+        paymentId, 
+        orderId, 
+        amount, 
+        description
+    });
+
+    res.status(200).json({ success: true, message: 'Emails sent successfully.' });
+  } catch (error) {
+    console.error("Booking Notification Error:", error);
+    res.status(500).json({ message: 'Error processing notification' });
+  }
+};
+
 
 // Request Access to a Session ---
 exports.requestSessionAccess = async (req, res) => {
@@ -71,12 +163,30 @@ exports.getNotifications = async (req, res) => {
 
 // --- User Registration ---
 exports.register = async (req, res) => {
-  try {
-    const { Name, email, phone, password } = req.body;
+   try {
+    const { Name, email, phone, password, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
 
     if (!email || !password || !Name) {
       return res.status(400).json({ message: 'Please fill in all fields' });
     }
+
+    // 1. Payment Verification
+    // Ensure payment details are present
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        return res.status(400).json({ message: 'Payment verification failed: Missing payment details.' });
+    }
+
+    // Verify Signature
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(body.toString())
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ message: 'Invalid payment signature. Registration failed.' });
+    }
+
     const normalizedEmail = email.toLowerCase().trim();
     const cleanPassword = password.trim();
 
@@ -93,15 +203,36 @@ exports.register = async (req, res) => {
       email: normalizedEmail,
       phone: phone.trim(),
       password: hashedPassword, 
-      hasPaid: true, 
+      hasPaid: true, // Confirmed by signature verification above
+      paymentInfo: {
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        amountPaid: 30000,
+        paymentDate: Date.now()
+      },
       completedSessions: [],
-      // Ensure these fields exist
       accessRequests: [],
       notifications: [] 
     });
 
     await user.save();
+    // --- SEND WELCOME EMAIL WITH INVOICE ---
+    try {
+        await sendInvoiceAndNotification({
+            name: Name,
+            email: normalizedEmail,
+            phone,
+            paymentId: razorpay_payment_id,
+            orderId: razorpay_order_id,
+            amount: 30000,
+            description: "15-Day Transformation Course"
+        });
+    } catch (emailError) {
+        console.error("Failed to send registration email:", emailError);
+    }
 
+    // Token Generation
     const payload = { user: { id: user.id } };
 
     jwt.sign(
@@ -127,6 +258,7 @@ exports.register = async (req, res) => {
       }
     );
   } catch (err) {
+    console.error("Registration Error:", err);
     res.status(500).send(err.message || 'Server Error');
   }
 };

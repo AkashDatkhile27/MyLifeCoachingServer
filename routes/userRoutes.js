@@ -6,6 +6,12 @@ const reflectionsController=require('../controllers/reflectionsController')
 
 
 // Auth & Profile
+router.post('/create-order', userController.createPaymentOrder); // New Payment Route
+// Route to create the 199 Razorpay order
+router.post('/create-session-order', userController.createSessionPaymentOrder);
+// Route to notify admin after successful payment
+router.post('/notify-admin-booking', userController.notifyAdminBooking);
+
 router.post('/register', userController.register);
 router.post('/login', userController.login);
 router.post('/forgot-password', userController.forgotPasswordLinkCreation);
