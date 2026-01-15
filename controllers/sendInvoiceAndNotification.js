@@ -3,51 +3,51 @@ const generateIntroSessionInvoice= require('../utils/invoiceTemplates');
 const sendEmail = require('../utils/sendEmail');
 
 const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, orderId, amount, description }) => {
-    const date = new Date().toLocaleDateString();
+      const date = new Date().toLocaleDateString();
 
     const invoiceContent = generateIntroSessionInvoice({
         name, email, phone, paymentId, orderId, amount, description, date
     });
-    let adminEmailBody = '';
 
-    if(amount == 30000)
-    {
-        //Email Admin: Combine Admin Info + Invoice
-    adminEmailBody = `
-      <div style="font-family: Arial, sans-serif; color: #333;">
-        <h2>New Booking Alert! 🚀</h2>
-        <p>A new user has booked the 15-Day Transformation Course Session (₹${amount}).</p>
-        <ul>
-            <li><strong>Name:</strong> ${name}</li>
-            <li><strong>Phone:</strong> ${phone}</li>
-            <li><strong>Email:</strong> ${email}</li>
-            <li><strong>Payment ID:</strong> ${paymentId}</li>
-        </ul>
-        <hr/>
-        <h3>Copy of User Invoice:</h3>
-        ${invoiceContent}
-      </div>
-    `;
+    // Determine Admin Email Body based on amount
+    let adminEmailBody = '';
+    if(amount == 30000) {
+        adminEmailBody = `
+          <div style="font-family: Arial, sans-serif; color: #333;">
+            <h2>New Booking Alert! 🚀</h2>
+            <p>A new user has booked the 15-Day Transformation Course Session (₹${amount}).</p>
+            <ul>
+                <li><strong>Name:</strong> ${name}</li>
+                <li><strong>Phone:</strong> ${phone}</li>
+                <li><strong>Email:</strong> ${email}</li>
+                <li><strong>Payment ID:</strong> ${paymentId}</li>
+            </ul>
+            <hr/>
+            <h3>Copy of User Invoice:</h3>
+            ${invoiceContent}
+          </div>
+        `;
+    } else {
+        adminEmailBody = `
+          <div style="font-family: Arial, sans-serif; color: #333;">
+            <h2>New Booking Alert! 🚀</h2>
+            <p>A new user has booked the Intro Session (₹${amount}).</p>
+            <ul>
+                <li><strong>Name:</strong> ${name}</li>
+                <li><strong>Phone:</strong> ${phone}</li>
+                <li><strong>Email:</strong> ${email}</li>
+                <li><strong>Payment ID:</strong> ${paymentId}</li>
+            </ul>
+            <hr/>
+            <h3>Copy of User Invoice:</h3>
+            ${invoiceContent}
+          </div>
+        `;
     }
-    else{
-    adminEmailBody = `
-      <div style="font-family: Arial, sans-serif; color: #333;">
-        <h2>New Booking Alert! 🚀</h2>
-        <p>A new user has booked the Intro Session (₹${amount}).</p>
-        <ul>
-            <li><strong>Name:</strong> ${name}</li>
-            <li><strong>Phone:</strong> ${phone}</li>
-            <li><strong>Email:</strong> ${email}</li>
-            <li><strong>Payment ID:</strong> ${paymentId}</li>
-        </ul>
-        <hr/>
-        <h3>Copy of User Invoice:</h3>
-        ${invoiceContent}
-      </div>
-    `;
-    }
-    
-   let pdfGenerated = false;
+
+    // 1. Initialize attachments array immediately
+    let attachments = [];
+    let pdfGenerated = false;
 
     // --- TRY PDF GENERATION (Lazy Load & Fallback) ---
     try {
@@ -56,7 +56,15 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
         
         const browser = await puppeteer.launch({ 
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            // Critical args for serverless/container environments to prevent crashes
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--single-process', 
+                '--no-zygote',
+                '--disable-gpu'
+            ]
         });
         const page = await browser.newPage();
         
@@ -93,7 +101,8 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
             contentType: 'text/html'
         });
     }
-        //Email User: Combine Greeting + Invoice in the email body
+
+    // User Email Body
     const userEmailBody = `
       <div style="font-family: Arial, sans-serif; color: #333;">
         <p>Hi <strong>${name}</strong>,</p>
@@ -111,22 +120,21 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
         email: email,
         subject: 'Welcome to MyLifeCoaching! Payment Receipt',
         message: `Hi ${name},\n\nWelcome to the ${description}! Your payment of ₹${amount} was successful. Please find your invoice attached.`,
-        html: userEmailBody, // Optional: Keep inline HTML for quick viewing
-        attachments
+        html: userEmailBody,
+        attachments: attachments // Explicitly pass the array
     });
 
     // Email Admin
     await sendEmail({
         email: process.env.SUPER_ADMIN_EMAIL || process.env.ADMIN_EMAIL,
-        subject: `New Registration: ${name}`,
-        message: `New user registered for the full course.\nName: ${name}`,
+        subject: `New Course Registration: ${name}`,
+        message: `New user registered for the full course.\nName: ${name}\nPhone: ${phone}\nAmount: ₹${amount}`,
         html: adminEmailBody,
-        attachments
+        attachments: attachments // Explicitly pass the array
     });
-   
-    
 };
 
 
 module.exports = sendInvoiceAndNotification;
+
 
