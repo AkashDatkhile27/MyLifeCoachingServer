@@ -48,48 +48,64 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
     // 1. Initialize attachments array immediately
     let attachments = [];
     let pdfGenerated = false;
+let pdfBuffer;
 
-    // --- TRY PDF GENERATION (Lazy Load & Fallback) ---
+    // --- TRY PDF GENERATION (Robust Serverless Logic) ---
     try {
-        // Require puppeteer inside the function so it doesn't crash the server if missing
-        const puppeteer = require('puppeteer'); 
+        let browser;
         
-        const browser = await puppeteer.launch({ 
-            headless: 'new',
-            // Critical args for serverless/container environments to prevent crashes
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage',
-                '--single-process', 
-                '--no-zygote',
-                '--disable-gpu'
-            ]
-        });
+        // Strategy: Check if we are in a serverless environment (like Vercel)
+        // You MUST install: npm install @sparticuz/chromium puppeteer-core
+        try {
+            const chromium = require('@sparticuz/chromium');
+            const puppeteerCore = require('puppeteer-core');
+
+            // Optional: Adjust graphics mode for Vercel
+            // chromium.setHeadlessMode = true; 
+            // chromium.setGraphicsMode = false;
+
+            browser = await puppeteerCore.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                ignoreHTTPSErrors: true,
+            });
+            console.log("Using @sparticuz/chromium for PDF generation.");
+        } catch (serverlessError) {
+            // Fallback: Standard Puppeteer (Local Development)
+            console.log("Serverless chromium not found, trying standard puppeteer...");
+            const puppeteer = require('puppeteer');
+            browser = await puppeteer.launch({ 
+                headless: 'new',
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            });
+        }
+        
         const page = await browser.newPage();
         
         // Use setContent with timeout
-        await page.setContent(invoiceContent, { waitUntil: 'networkidle0', timeout: 10000 });
+        await page.setContent(invoiceContent, { waitUntil: 'networkidle0', timeout: 15000 });
         
-        const pdfBuffer = await page.pdf({ 
+        pdfBuffer = await page.pdf({ 
             format: 'A4', 
             printBackground: true,
             margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
         });
-        
+        pdfGenerated = true;
         await browser.close();
 
-        attachments.push({
-            filename: 'Invoice.pdf',
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-        });
-        pdfGenerated = true;
-
     } catch (pdfError) {
-        console.error("⚠️ PDF Generation Failed (Falling back to HTML Invoice):", pdfError.message);
-        // Do NOT throw error here. We want to proceed with HTML fallback.
+        console.error("⚠️ PDF Generation Failed:", pdfError.message);
+        throw new Error("Failed to generate PDF Invoice. Please check server logs for Puppeteer configuration.");
     }
+
+    const attachments = [{
+        filename: 'Invoice.pdf',
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+    }];
+
 
     // --- FALLBACK TO HTML FILE ---
     // If PDF failed or Puppeteer wasn't found, send HTML
@@ -136,5 +152,6 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
 
 
 module.exports = sendInvoiceAndNotification;
+
 
 
