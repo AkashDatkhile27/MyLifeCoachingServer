@@ -9,10 +9,6 @@ const auth = require('../middleware/userAuth');
 // @access  Private
 router.get('/sessions', auth, courseController.getSessions);
 
-// @route   POST /api/course/pay
-// @desc    Unlock the full course (Mock Payment)
-// @access  Private
-router.post('/pay', auth, courseController.processPayment);
 
 // @route   POST /api/course/reflection
 // @desc    Submit a reflection for a specific session

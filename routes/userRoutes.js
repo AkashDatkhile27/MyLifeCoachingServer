@@ -14,6 +14,7 @@ router.post('/notify-admin-booking', userController.notifyAdminBooking);
 
 router.post('/register', userController.register);
 router.post('/login', userController.login);
+router.post('/verify-otp', userController.verifyLoginOtp);
 router.post('/forgot-password', userController.forgotPasswordLinkCreation);
 router.post('/reset-password', auth,userController.resetPassword);
 router.post('/reset-password-with-link', userController.resetPasswordWithEmailLink);
