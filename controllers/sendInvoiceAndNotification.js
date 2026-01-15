@@ -1,9 +1,9 @@
-// const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer');
 const generateIntroSessionInvoice= require('../utils/invoiceTemplates');
 const sendEmail = require('../utils/sendEmail');
 
 const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, orderId, amount, description }) => {
-      const date = new Date().toLocaleDateString();
+    const date = new Date().toLocaleDateString();
 
     const invoiceContent = generateIntroSessionInvoice({
         name, email, phone, paymentId, orderId, amount, description, date
@@ -45,10 +45,7 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
         `;
     }
 
-    // 1. Initialize attachments array immediately
-    let attachments = [];
-    let pdfGenerated = false;
-let pdfBuffer;
+    let pdfBuffer;
 
     // --- TRY PDF GENERATION (Robust Serverless Logic) ---
     try {
@@ -60,9 +57,11 @@ let pdfBuffer;
             const chromium = require('@sparticuz/chromium');
             const puppeteerCore = require('puppeteer-core');
 
-            // Optional: Adjust graphics mode for Vercel
-            // chromium.setHeadlessMode = true; 
-            // chromium.setGraphicsMode = false;
+            // Optimized settings for Vercel/Serverless
+            chromium.setHeadlessMode = true; 
+            chromium.setGraphicsMode = false;
+
+            console.log("Launching @sparticuz/chromium with puppeteer-core...");
 
             browser = await puppeteerCore.launch({
                 args: chromium.args,
@@ -71,10 +70,9 @@ let pdfBuffer;
                 headless: chromium.headless,
                 ignoreHTTPSErrors: true,
             });
-            console.log("Using @sparticuz/chromium for PDF generation.");
         } catch (serverlessError) {
             // Fallback: Standard Puppeteer (Local Development)
-            console.log("Serverless chromium not found, trying standard puppeteer...");
+            console.log("Serverless chromium not found (dev mode?), trying standard puppeteer...");
             const puppeteer = require('puppeteer');
             browser = await puppeteer.launch({ 
                 headless: 'new',
@@ -92,7 +90,7 @@ let pdfBuffer;
             printBackground: true,
             margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
         });
-        pdfGenerated = true;
+        
         await browser.close();
 
     } catch (pdfError) {
@@ -106,24 +104,12 @@ let pdfBuffer;
         contentType: 'application/pdf'
     }];
 
-
-    // --- FALLBACK TO HTML FILE ---
-    // If PDF failed or Puppeteer wasn't found, send HTML
-    if (!pdfGenerated) {
-        const fullHtmlAttachment = `<!DOCTYPE html><html><head><title>Invoice</title></head><body style="font-family:Arial;">${invoiceContent}</body></html>`;
-        attachments.push({
-            filename: 'Invoice.html',
-            content: fullHtmlAttachment,
-            contentType: 'text/html'
-        });
-    }
-
     // User Email Body
     const userEmailBody = `
       <div style="font-family: Arial, sans-serif; color: #333;">
         <p>Hi <strong>${name}</strong>,</p>
         <p>Your session booking is successfully confirmed!</p>
-        <p>Please find your official payment receipt details below. A downloadable copy is also attached to this email.</p>
+        <p>Please find your official payment receipt details attached to this email.</p>
         <br/>
         ${invoiceContent}
         <br/>
@@ -137,7 +123,7 @@ let pdfBuffer;
         subject: 'Welcome to MyLifeCoaching! Payment Receipt',
         message: `Hi ${name},\n\nWelcome to the ${description}! Your payment of ₹${amount} was successful. Please find your invoice attached.`,
         html: userEmailBody,
-        attachments: attachments // Explicitly pass the array
+        attachments: attachments 
     });
 
     // Email Admin
@@ -146,12 +132,8 @@ let pdfBuffer;
         subject: `New Course Registration: ${name}`,
         message: `New user registered for the full course.\nName: ${name}\nPhone: ${phone}\nAmount: ₹${amount}`,
         html: adminEmailBody,
-        attachments: attachments // Explicitly pass the array
+        attachments: attachments 
     });
 };
 
-
 module.exports = sendInvoiceAndNotification;
-
-
-
