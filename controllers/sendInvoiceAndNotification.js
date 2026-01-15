@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+// const puppeteer = require('puppeteer');
 const generateIntroSessionInvoice= require('../utils/invoiceTemplates');
 const sendEmail = require('../utils/sendEmail');
 
@@ -47,16 +47,21 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
     `;
     }
     
-   // --- TRY PDF GENERATION ---
+   let pdfGenerated = false;
+
+    // --- TRY PDF GENERATION (Lazy Load & Fallback) ---
     try {
+        // Require puppeteer inside the function so it doesn't crash the server if missing
+        const puppeteer = require('puppeteer'); 
+        
         const browser = await puppeteer.launch({ 
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Critical for server environments
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         });
         const page = await browser.newPage();
         
-        // Use setContent with timeout to prevent hanging
-        await page.setContent(invoiceContent, { waitUntil: 'networkidle0', timeout: 30000 });
+        // Use setContent with timeout
+        await page.setContent(invoiceContent, { waitUntil: 'networkidle0', timeout: 10000 });
         
         const pdfBuffer = await page.pdf({ 
             format: 'A4', 
@@ -71,8 +76,22 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
             content: pdfBuffer,
             contentType: 'application/pdf'
         });
+        pdfGenerated = true;
+
     } catch (pdfError) {
-        console.error("⚠️ PDF Generation Failed (Falling back to HTML):", pdfError.message);
+        console.error("⚠️ PDF Generation Failed (Falling back to HTML Invoice):", pdfError.message);
+        // Do NOT throw error here. We want to proceed with HTML fallback.
+    }
+
+    // --- FALLBACK TO HTML FILE ---
+    // If PDF failed or Puppeteer wasn't found, send HTML
+    if (!pdfGenerated) {
+        const fullHtmlAttachment = `<!DOCTYPE html><html><head><title>Invoice</title></head><body style="font-family:Arial;">${invoiceContent}</body></html>`;
+        attachments.push({
+            filename: 'Invoice.html',
+            content: fullHtmlAttachment,
+            contentType: 'text/html'
+        });
     }
         //Email User: Combine Greeting + Invoice in the email body
     const userEmailBody = `
@@ -110,3 +129,4 @@ const sendInvoiceAndNotification = async ({ name, email, phone, paymentId, order
 
 
 module.exports = sendInvoiceAndNotification;
+
