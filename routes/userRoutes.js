@@ -2,31 +2,43 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const auth = require('../middleware/userAuth');
-const reflectionsController=require('../controllers/reflectionsController')
+const reflectionsController = require('../controllers/reflectionsController');
+// Import validation middleware
+const { validateRegistration, validateLogin, validateBooking } = require('../middleware/validations');
 
 
-// Auth & Profile
-router.post('/create-order', userController.createPaymentOrder); // New Payment Route
-// Route to create the 199 Razorpay order
-router.post('/create-session-order', userController.createSessionPaymentOrder);
-// Route to notify admin after successful payment
-router.post('/notify-admin-booking', userController.notifyAdminBooking);
+// --- Pre-Registration Verification ---
+router.post('/send-verification-otp', userController.sendRegistrationOtp);
+router.post('/verify-registration-otp', userController.verifyRegistrationOtp);
 
-router.post('/register', userController.register);
-router.post('/login', userController.login);
+// --- Payment Order Routes (Now Verified!) ---
+// NOTE: Frontend MUST send form data (Name, email, phone, etc.) to these endpoints now.
+// If valid, it proceeds to userController.createPaymentOrder. If not, it errors 400.
+
+// 1. For Course Registration (Needs Name, Email, Phone, Password)
+router.post('/create-order', validateRegistration, userController.createPaymentOrder);
+
+// 2. For Session Booking (Needs Name, Email, Phone)
+router.post('/create-session-order', validateBooking, userController.createSessionPaymentOrder);
+
+// --- Auth Routes ---
+router.post('/register', validateRegistration, userController.register);
+router.post('/login', validateLogin, userController.login);
+
 router.post('/verify-otp', userController.verifyLoginOtp);
 router.post('/forgot-password', userController.forgotPasswordLinkCreation);
-router.post('/reset-password', auth,userController.resetPassword);
+router.post('/reset-password', auth, userController.resetPassword);
 router.post('/reset-password-with-link', userController.resetPasswordWithEmailLink);
+
 router.get('/user', auth, userController.getUser);
 router.put('/update-profile', auth, userController.updateProfile);
 
-// Notifications ---
+// --- Notification & Admin Routes ---
 router.get('/notifications', auth, userController.getNotifications);
+router.post('/notify-admin-booking', userController.notifyAdminBooking);
 
-// Reflection Routes
+// --- Reflection Routes ---
 router.get('/fetch-reflections', auth, reflectionsController.getUserReflections);
-// Create or Append to a reflection for a specific session
 router.post('/create-reflections', auth, reflectionsController.createOrUpdateReflection);
 
 module.exports = router;

@@ -21,6 +21,21 @@ const razorpay = new Razorpay({
 // Frontend calls this first when user clicks "Pay & Register"
 exports.createPaymentOrder = async (req, res) => {
   try {
+
+      const { verificationToken } = req.body;
+
+    // 1. Verify the token exists
+    if (!verificationToken) {
+        return res.status(401).json({ message: "Please verify your email/phone first." });
+    }
+
+    // 2. Verify the token is valid
+    try {
+        jwt.verify(verificationToken, process.env.JWT_SECRET);
+    } catch (e) {
+        return res.status(401).json({ message: "Verification expired. Please verify again." });
+    }
+
     const options = {
       amount: 25000 * 100, // 30,000 INR in paise
       currency: "INR",
@@ -28,6 +43,7 @@ exports.createPaymentOrder = async (req, res) => {
       payment_capture: 1
     };
 
+    console.log("Creating Razorpay Order with options:", options);
     const order = await razorpay.orders.create(options);
     
     res.json({
@@ -47,6 +63,21 @@ exports.createPaymentOrder = async (req, res) => {
 // --- 1. Create Payment Order for ₹199 Session ---
 exports.createSessionPaymentOrder = async (req, res) => {
   try {
+
+     const { verificationToken } = req.body;
+
+    // 1. Verify the token exists
+    if (!verificationToken) {
+        return res.status(401).json({ message: "Please verify your email/phone first." });
+    }
+
+    // 2. Verify the token is valid
+    try {
+        jwt.verify(verificationToken, process.env.JWT_SECRET);
+    } catch (e) {
+        return res.status(401).json({ message: "Verification expired. Please verify again." });
+    }
+
     const options = {
       amount: 199 * 100, // 199 INR in paise
       currency: "INR",
@@ -67,6 +98,7 @@ exports.createSessionPaymentOrder = async (req, res) => {
     console.error("Razorpay Session Order Error:", error);
     res.status(500).json({ message: error.message || 'Error creating session payment order' });
   }
+
 };
 
 // --- 2. Notify Admin of New Booking ---
@@ -104,9 +136,7 @@ exports.register = async (req, res) => {
    try {
     const { Name, email, phone, password, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
 
-    if (!email || !password || !Name) {
-      return res.status(400).json({ message: 'Please fill in all fields' });
-    }
+
 
     // 1. Payment Verification
     // Ensure payment details are present
@@ -208,9 +238,9 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Please provide email and password' });
-    }
+    // if (!email || !password) {
+    //   return res.status(400).json({ message: 'Please provide email and password' });
+    // }
     const normalizedEmail = email.toLowerCase().trim();
     
     const user = await User.findOne({ email: normalizedEmail });
@@ -523,5 +553,86 @@ exports.getNotifications = async (req, res) => {
     res.json(sorted);
   } catch (err) {
     res.status(500).send(err.message || 'Server Error');
+  }
+};
+
+
+
+
+// 1. Send OTP (Email or Phone) - Before Payment
+exports.sendRegistrationOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) return res.status(400).json({ message: "Email is required" });
+
+    // Normalize inputs
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if user exists 
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) return res.status(400).json({ message: "Email already registered. Please Login." });
+
+    // Generate OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otpCode, salt);
+
+    // Delete old OTPs for this email
+    await Otp.deleteMany({ email: normalizedEmail });
+
+    // Save New OTP
+    await Otp.create({
+        email: normalizedEmail,
+        otp: hashedOtp,
+        createdAt: Date.now()
+    });
+
+    // Send OTP via Email
+    await sendEmail({
+        email: normalizedEmail,
+        subject: 'Verification OTP - MyLifeCoaching',
+        message: `Your verification code is: ${otpCode}\nValid for 10 minutes.`
+    });
+    
+    res.json({ success: true, message: `OTP sent to email successfully.` });
+
+  } catch (err) {
+    console.error("Send Registration OTP Error:", err);
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+};
+
+// 2. Verify OTP & Issue Token
+exports.verifyRegistrationOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!otp || !email) return res.status(400).json({ message: "Email and OTP are required" });
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find OTP record by email
+    const record = await Otp.findOne({ email: normalizedEmail });
+
+    if (!record) return res.status(400).json({ message: "OTP expired or invalid." });
+
+    const isMatch = await bcrypt.compare(otp, record.otp);
+    if (!isMatch) return res.status(400).json({ message: "Invalid OTP" });
+
+    // *** SUCCESS: Issue Verification Token ***
+    const verificationToken = jwt.sign(
+        { email: normalizedEmail, verified: true },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' }
+    );
+
+    // Clean up
+    await Otp.deleteOne({ _id: record._id });
+
+    res.json({ success: true, message: "Verified!", verificationToken });
+
+  } catch (err) {
+    console.error("Verify Registration OTP Error:", err);
+    res.status(500).json({ message: "Verification failed" });
   }
 };
